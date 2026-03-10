@@ -180,8 +180,6 @@ def match_student_profile(
     engine = RecommendationEngine()
     try:
         row = engine.single_student_match(topic=topic, cgpa=cgpa, course=course)
-        if not row:
-            raise HTTPException(status_code=404, detail="No professor/project match found")
         return StudentSingleMatchResult(**row)
     finally:
         engine.db.close()

@@ -197,7 +197,7 @@ class RecommendationEngine:
 
         dataset_path = Path("/Users/ashutoshpandey/Downloads/dataset_200.json")
         if not dataset_path.exists():
-            return None
+            return self._mock_student_match(topic=topic, cgpa=cgpa, course=course)
 
         with dataset_path.open("r", encoding="utf-8") as dataset_file:
             payload = json.load(dataset_file)
@@ -260,4 +260,33 @@ class RecommendationEngine:
                     "project_progress": None,
                 }
 
-        return best
+        return best or self._mock_student_match(topic=topic, cgpa=cgpa, course=course)
+
+    def _mock_student_match(self, topic: str, cgpa: float, course: str) -> dict[str, Any]:
+        cleaned_topic = topic.strip() or "research"
+        cleaned_course = course.strip() or "General"
+
+        if cgpa >= 8.5:
+            score = 89.0
+        elif cgpa >= 7.0:
+            score = 78.0
+        elif cgpa >= 6.0:
+            score = 66.0
+        else:
+            score = 58.0
+
+        topic_slug = "-".join(cleaned_topic.lower().split())[:20] or "topic"
+        match_id = f"mock-faculty-{topic_slug}"
+
+        return {
+            "match_type": "faculty",
+            "match_id": match_id,
+            "match_name": "Dr. Priya Menon",
+            "department": cleaned_course,
+            "score": score,
+            "reason": "Mock recommendation generated because no live graph/dataset match was available.",
+            "overlap_topics": [cleaned_topic],
+            "required_course": cleaned_course,
+            "project_status": None,
+            "project_progress": None,
+        }
