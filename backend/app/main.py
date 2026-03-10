@@ -12,8 +12,9 @@ from app.models import (
     PersonSearchResult,
     ProjectDetailResult,
     SearchResult,
+    StudentSingleMatchResult,
 )
-from ingest_data import ingest_dummy_data
+from ingest_data import ingest_dataset_json, ingest_dummy_data
 from recommendation_engine import RecommendationEngine
 from schema import get_schema_statements
 from search_engine import (
@@ -73,6 +74,25 @@ def ingest_dummy(
         return {"ingest": ingest_summary, "person_sync": None}
 
     sync_summary = sync_person_projections(include_embeddings=sync_people_embeddings)
+    return {"ingest": ingest_summary, "person_sync": sync_summary}
+
+
+@app.post("/admin/ingest-dataset-json")
+def ingest_dataset(
+    file_path: str = Query(
+        "/Users/ashutoshpandey/Downloads/dataset_200.json",
+        description="Absolute path to dataset JSON file",
+    ),
+    sync_people: bool = Query(
+        True,
+        description="When true, sync Faculty/Student into Person nodes after ingest",
+    ),
+) -> dict:
+    ingest_summary = ingest_dataset_json(file_path=file_path)
+    if not sync_people:
+        return {"ingest": ingest_summary, "person_sync": None}
+
+    sync_summary = sync_person_projections(include_embeddings=False)
     return {"ingest": ingest_summary, "person_sync": sync_summary}
 
 
@@ -147,6 +167,22 @@ def innovation_hotspots(years: int = Query(2, ge=1, le=10)) -> list[Hotspot]:
     try:
         rows = engine.innovation_hotspots(years=years)
         return [Hotspot(**r) for r in rows]
+    finally:
+        engine.db.close()
+
+
+@app.get("/match/student", response_model=StudentSingleMatchResult)
+def match_student_profile(
+    topic: str = Query(..., min_length=2, description="Student research interest/topic"),
+    cgpa: float = Query(..., ge=0.0, le=10.0, description="Student CGPA out of 10"),
+    course: str = Query(..., min_length=2, description="Student course/department context"),
+) -> StudentSingleMatchResult:
+    engine = RecommendationEngine()
+    try:
+        row = engine.single_student_match(topic=topic, cgpa=cgpa, course=course)
+        if not row:
+            raise HTTPException(status_code=404, detail="No professor/project match found")
+        return StudentSingleMatchResult(**row)
     finally:
         engine.db.close()
 

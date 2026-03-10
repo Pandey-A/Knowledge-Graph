@@ -59,6 +59,19 @@ class Hotspot(BaseModel):
     momentum_score: float
 
 
+class StudentSingleMatchResult(BaseModel):
+    match_type: str
+    match_id: str
+    match_name: str
+    department: str | None = None
+    score: float
+    reason: str
+    overlap_topics: list[str] = Field(default_factory=list)
+    required_course: str | None = None
+    project_status: str | None = None
+    project_progress: int | None = None
+
+
 class GraphOverviewCounts(BaseModel):
     students: int
     faculty: int

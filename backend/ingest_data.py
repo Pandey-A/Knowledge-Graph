@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import random
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from neo4j import GraphDatabase
 
@@ -315,3 +317,149 @@ def ingest_dummy_data(seed: int = 42, include_embeddings: bool = False) -> dict:
 if __name__ == "__main__":
     result = ingest_dummy_data()
     print(result)
+
+
+def ingest_dataset_json(file_path: str) -> dict:
+    dataset_path = Path(file_path).expanduser()
+    if not dataset_path.exists():
+        raise FileNotFoundError(f"Dataset file not found: {dataset_path}")
+
+    with dataset_path.open("r", encoding="utf-8") as dataset_file:
+        payload = json.load(dataset_file)
+
+    nodes = payload.get("nodes", {})
+    edges = payload.get("edges", {})
+
+    faculty_rows = nodes.get("faculty", [])
+    student_rows = nodes.get("students", [])
+    project_rows = nodes.get("projects", [])
+    publication_rows = nodes.get("publications", [])
+    skill_rows = nodes.get("skills", [])
+
+    works_on_edges = edges.get("works_on", [])
+    authored_edges = edges.get("authored", [])
+    has_skill_edges = edges.get("has_skill", [])
+    affiliated_edges = edges.get("affiliated", [])
+
+    with GraphDatabase.driver(settings.neo4j_uri, auth=(settings.neo4j_user, settings.neo4j_password)) as driver:
+        with driver.session(database=settings.neo4j_database) as session:
+            session.run(
+                """
+                UNWIND $rows AS row
+                MERGE (f:Faculty {id: row.id})
+                SET f.name = row.name,
+                    f.department = row.department,
+                    f.email = row.email,
+                    f.bio = row.bio
+                """,
+                {"rows": faculty_rows},
+            )
+
+            session.run(
+                """
+                UNWIND $rows AS row
+                MERGE (s:Student {id: row.id})
+                SET s.name = row.name,
+                    s.program = row.program,
+                    s.email = row.email,
+                    s.expected_grad = row.expected_grad
+                """,
+                {"rows": student_rows},
+            )
+
+            session.run(
+                """
+                UNWIND $rows AS row
+                MERGE (p:ResearchProject {id: row.id})
+                SET p.title = row.title,
+                    p.description = row.description,
+                    p.tags = coalesce(row.tags, []),
+                    p.created_at = CASE WHEN row.created_at IS NULL THEN p.created_at ELSE date(row.created_at) END,
+                    p.status = row.status,
+                    p.owner_id = row.owner_id
+                """,
+                {"rows": project_rows},
+            )
+
+            session.run(
+                """
+                UNWIND $rows AS row
+                MERGE (p:Publication {id: row.id})
+                SET p.title = row.title,
+                    p.abstract = row.abstract,
+                    p.tags = coalesce(row.tags, []),
+                    p.year = row.year,
+                    p.published_at = CASE WHEN row.published_at IS NULL THEN p.published_at ELSE date(row.published_at) END,
+                    p.venue = row.venue,
+                    p.author_ids = coalesce(row.author_ids, [])
+                """,
+                {"rows": publication_rows},
+            )
+
+            session.run(
+                """
+                UNWIND $rows AS row
+                MERGE (s:Skill {id: row.id})
+                SET s.name = row.name,
+                    s.category = row.category
+                """,
+                {"rows": skill_rows},
+            )
+
+            session.run(
+                """
+                UNWIND $rows AS row
+                MATCH (person {id: row.person_id})
+                MATCH (project:ResearchProject {id: row.project_id})
+                WHERE person:Faculty OR person:Student
+                MERGE (person)-[:WORKS_ON]->(project)
+                """,
+                {"rows": works_on_edges},
+            )
+
+            session.run(
+                """
+                UNWIND $rows AS row
+                MATCH (person {id: row.person_id})
+                MATCH (pub:Publication {id: row.publication_id})
+                WHERE person:Faculty OR person:Student
+                MERGE (person)-[:AUTHORED]->(pub)
+                """,
+                {"rows": authored_edges},
+            )
+
+            session.run(
+                """
+                UNWIND $rows AS row
+                MATCH (person {id: row.person_id})
+                MATCH (skill:Skill {id: row.skill_id})
+                WHERE person:Faculty OR person:Student
+                MERGE (person)-[:HAS_SKILL]->(skill)
+                """,
+                {"rows": has_skill_edges},
+            )
+
+            session.run(
+                """
+                UNWIND $rows AS row
+                MATCH (person {id: row.person_id})
+                WHERE person:Faculty OR person:Student
+                MERGE (d:Department {name: row.department})
+                SET person.department = row.department
+                MERGE (person)-[:AFFILIATED_WITH]->(d)
+                """,
+                {"rows": affiliated_edges},
+            )
+
+    return {
+        "faculty": len(faculty_rows),
+        "students": len(student_rows),
+        "projects": len(project_rows),
+        "publications": len(publication_rows),
+        "skills": len(skill_rows),
+        "works_on": len(works_on_edges),
+        "authored": len(authored_edges),
+        "has_skill": len(has_skill_edges),
+        "affiliated": len(affiliated_edges),
+        "source": str(dataset_path),
+    }
