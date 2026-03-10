@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { 
   Activity, Brain, Search, Sparkles, Users, 
   GraduationCap, Network, RefreshCw, 
-  FlaskConical, BookOpen, MapPin, ArrowRight
+  FlaskConical, BookOpen, MapPin, ArrowRight, X
 } from "lucide-react";
 
 import { Badge } from "./components/ui/badge";
@@ -169,6 +169,8 @@ export function App() {
   const [personResults, setPersonResults] = useState<PersonSearchResult[]>([]);
   const [facultyResults, setFacultyResults] = useState<FacultyDetailResult[]>([]);
   const [projectResults, setProjectResults] = useState<ProjectDetailResult[]>([]);
+  const [selectedPerson, setSelectedPerson] = useState<PersonSearchResult | null>(null);
+  const [selectedPersonFacultyProfile, setSelectedPersonFacultyProfile] = useState<FacultyDetailResult | null>(null);
   const [studentTopic, setStudentTopic] = useState("sustainable polymers");
   const [studentCgpa, setStudentCgpa] = useState("8.5");
   const [studentCourse, setStudentCourse] = useState("Chemical Engineering");
@@ -182,6 +184,7 @@ export function App() {
     person: false,
     faculty: false,
     project: false,
+    personProfile: false,
     studentMatch: false,
     facultyProfile: false,
     hotspot: false,
@@ -315,6 +318,30 @@ export function App() {
     }
   };
 
+  const openPersonProfile = async (person: PersonSearchResult) => {
+    setSelectedPerson(person);
+    setSelectedPersonFacultyProfile(null);
+
+    try {
+      const data = await runRequest<FacultyDetailResult[]>(
+        `${apiBase}/search/faculty?query=${encodeURIComponent(person.name ?? "")}&limit=5`,
+        "personProfile"
+      );
+      const best =
+        data.find((row) => row.faculty_id === person.person_id) ??
+        data.find((row) => (row.name ?? "").toLowerCase() === (person.name ?? "").toLowerCase()) ??
+        null;
+      setSelectedPersonFacultyProfile(best);
+    } catch {
+      setSelectedPersonFacultyProfile(null);
+    }
+  };
+
+  const closePersonProfile = () => {
+    setSelectedPerson(null);
+    setSelectedPersonFacultyProfile(null);
+  };
+
   const runFacultySearch = async () => {
     try {
       const data = await runRequest<FacultyDetailResult[]>(`${apiBase}/search/faculty?query=${encodeURIComponent(facultyQuery)}&limit=5`, "faculty");
@@ -365,7 +392,8 @@ export function App() {
   useEffect(() => { loadGraphOverview(); }, []);
 
   return (
-    <main className="min-h-screen bg-[#020617] text-slate-200 font-sans selection:bg-indigo-500/30">
+    <>
+      <main className="min-h-screen bg-[#020617] text-slate-200 font-sans selection:bg-indigo-500/30">
       {/* Soft Background Glows */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-indigo-500/10 blur-[120px] rounded-full" />
@@ -492,7 +520,12 @@ export function App() {
                     <div className="py-20 text-center text-slate-500 italic">Enter a query to explore the graph...</div>
                   )}
                   {personResults.map((r) => (
-                    <div key={r.person_id} className="group p-5 rounded-xl border border-slate-800 bg-slate-950/40 hover:border-indigo-500/50 transition-all">
+                    <button
+                      key={r.person_id}
+                      type="button"
+                      onClick={() => openPersonProfile(r)}
+                      className="group w-full p-5 rounded-xl border border-slate-800 bg-slate-950/40 hover:border-indigo-500/50 transition-all text-left"
+                    >
                       <div className="flex justify-between items-start mb-4">
                         <div>
                           <h3 className="font-bold text-xl text-white group-hover:text-indigo-300 transition-colors">{r.name}</h3>
@@ -507,25 +540,153 @@ export function App() {
                       <div className="flex flex-wrap gap-2">
                         {r.skills.map(s => <Badge key={s} className="bg-slate-800/50 text-slate-300 font-normal">{s}</Badge>)}
                       </div>
+                    </button>
+                  ))}
+                </div>
+              </Card>
+            )}
+
+            {activeTab === "faculty" && (
+              <Card className="bg-slate-900/40 border-slate-800/50 backdrop-blur-md overflow-hidden animate-in fade-in slide-in-from-bottom-2">
+                <div className="p-5 border-b border-slate-800/50 bg-slate-950/20 flex gap-3">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                    <Input
+                      value={facultyQuery}
+                      onChange={(e) => setFacultyQuery(e.target.value)}
+                      placeholder="Search faculty by name, email, department, skill..."
+                      className="bg-slate-950 border-slate-800 h-12 pl-10 focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <Button onClick={runFacultySearch} disabled={loading.faculty} className="bg-indigo-600 hover:bg-indigo-500 h-12 px-8 font-bold">
+                    {loading.faculty ? "Searching..." : "Search Faculty"}
+                  </Button>
+                </div>
+                <div className="max-h-[500px] overflow-y-auto p-6 space-y-4">
+                  {facultyResults.length === 0 && (
+                    <div className="py-20 text-center text-slate-500 italic">Search and explore professor profiles with email and prior work.</div>
+                  )}
+                  {facultyResults.map((f) => (
+                    <div key={f.faculty_id} className="p-5 rounded-xl border border-slate-800 bg-slate-950/40 hover:border-indigo-500/50 transition-all">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <h3 className="font-bold text-xl text-white">{f.name}</h3>
+                          <p className="text-sm text-slate-400 mt-1">{f.department || "Department unavailable"}</p>
+                          <p className="text-xs text-slate-500 mt-1">{f.email || "Email unavailable"}</p>
+                        </div>
+                        <Badge className="bg-indigo-500/10 text-indigo-300 border-indigo-500/20">Faculty</Badge>
+                      </div>
+
+                      <div className="mt-4 space-y-3">
+                        <div>
+                          <p className="text-[11px] text-slate-500 uppercase tracking-wider mb-2">Skills</p>
+                          <div className="flex flex-wrap gap-2">
+                            {f.skills.length > 0 ? (
+                              f.skills.map((skill) => (
+                                <Badge key={skill} className="bg-slate-800/60 text-slate-300 border-slate-700 text-[10px] font-normal">{skill}</Badge>
+                              ))
+                            ) : (
+                              <span className="text-xs text-slate-500">No skills listed</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div>
+                          <p className="text-[11px] text-slate-500 uppercase tracking-wider mb-2">Current Work</p>
+                          <div className="flex flex-wrap gap-2">
+                            {f.current_projects.length > 0 ? (
+                              f.current_projects.map((project) => (
+                                <Badge key={project} className="bg-emerald-500/10 text-emerald-300 border-emerald-500/20 text-[10px] font-normal">{project}</Badge>
+                              ))
+                            ) : (
+                              <span className="text-xs text-slate-500">No current projects listed</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div>
+                          <p className="text-[11px] text-slate-500 uppercase tracking-wider mb-2">Previous Work</p>
+                          <div className="flex flex-wrap gap-2">
+                            {f.previous_projects.length > 0 ? (
+                              f.previous_projects.map((project) => (
+                                <Badge key={project} className="bg-blue-500/10 text-blue-300 border-blue-500/20 text-[10px] font-normal">{project}</Badge>
+                              ))
+                            ) : (
+                              <span className="text-xs text-slate-500">No previous projects listed</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
               </Card>
             )}
 
-            {/* Other tabs can be added here with similar styling */}
+            {activeTab === "projects" && (
+              <Card className="bg-slate-900/40 border-slate-800/50 backdrop-blur-md overflow-hidden animate-in fade-in slide-in-from-bottom-2">
+                <div className="p-5 border-b border-slate-800/50 bg-slate-950/20 flex gap-3">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                    <Input
+                      value={projectQuery}
+                      onChange={(e) => setProjectQuery(e.target.value)}
+                      placeholder="Search project title, problem statement, tags..."
+                      className="bg-slate-950 border-slate-800 h-12 pl-10 focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <Button onClick={runProjectSearch} disabled={loading.project} className="bg-indigo-600 hover:bg-indigo-500 h-12 px-8 font-bold">
+                    {loading.project ? "Searching..." : "Search Projects"}
+                  </Button>
+                </div>
+                <div className="max-h-[500px] overflow-y-auto p-6 space-y-4">
+                  {projectResults.length === 0 && (
+                    <div className="py-20 text-center text-slate-500 italic">Search and explore project cards with status and supervisors.</div>
+                  )}
+                  {projectResults.map((p) => (
+                    <div key={p.project_id} className="p-5 rounded-xl border border-slate-800 bg-slate-950/40 hover:border-indigo-500/50 transition-all">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <h3 className="font-bold text-xl text-white">{p.project_name}</h3>
+                          <p className="text-xs text-slate-500 mt-1">{p.project_id}</p>
+                        </div>
+                        <Badge className="bg-indigo-500/10 text-indigo-300 border-indigo-500/20 capitalize">{p.status || "unknown"}</Badge>
+                      </div>
+
+                      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-300">
+                        <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                          <p className="text-[11px] text-slate-500 uppercase tracking-wider mb-1">Progress</p>
+                          <p>{p.progress != null ? `${p.progress}%` : "Not available"}</p>
+                        </div>
+                        <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                          <p className="text-[11px] text-slate-500 uppercase tracking-wider mb-1">Faculty Supervisors</p>
+                          <p>{p.faculty_names.length > 0 ? p.faculty_names.join(", ") : "Not listed"}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
 
             {/* Path Visualization Grid */}
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-300">Graph Link Preview</h3>
+                <p className="text-xs text-slate-500 mt-1">ST = Student, PJ = Project, showing sampled student-to-project graph connections.</p>
+              </div>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {graphOverview?.connections.slice(0, 4).map((c, i) => (
                 <div key={i} className="p-5 rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900 to-slate-950 shadow-inner">
                   <div className="flex items-center gap-3 text-sm">
-                    <div className="w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-400 font-bold text-[10px]">ST</div>
+                    <div className="w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-400 font-bold text-[10px]" title="Student">ST</div>
                     <span className="font-medium text-slate-200">{c.student_name}</span>
                     <ArrowRight className="h-4 w-4 text-slate-600" />
-                    <div className="w-8 h-8 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-400 font-bold text-[10px]">PJ</div>
+                    <div className="w-8 h-8 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-400 font-bold text-[10px]" title="Project">PJ</div>
                     <span className="font-bold text-indigo-300">{c.project_name}</span>
                   </div>
+                  <p className="text-xs text-slate-500 mt-2">Mentored by: {c.faculty_name}</p>
                 </div>
               ))}
             </div>
@@ -691,6 +852,122 @@ export function App() {
           </div>
         </div>
       </div>
-    </main>
+      </main>
+
+      {selectedPerson && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl rounded-2xl border border-indigo-500/20 bg-slate-900 shadow-2xl">
+            <div className="flex items-start justify-between border-b border-slate-800 p-5">
+              <div>
+                <p className="text-[11px] uppercase tracking-widest text-indigo-300">Profile Card</p>
+                <h3 className="text-xl font-bold text-white mt-1">{selectedPerson.name ?? "Unknown Profile"}</h3>
+                <p className="text-xs text-slate-400 mt-1">{selectedPerson.person_id}</p>
+              </div>
+              <button
+                type="button"
+                onClick={closePersonProfile}
+                className="rounded-md border border-slate-700 p-2 text-slate-300 hover:text-white hover:border-indigo-500/40"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                  <p className="text-[11px] text-slate-500 uppercase tracking-wider mb-1">Department</p>
+                  <p className="text-sm text-slate-200">{selectedPerson.department || "Not available"}</p>
+                </div>
+                <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                  <p className="text-[11px] text-slate-500 uppercase tracking-wider mb-1">Match Score</p>
+                  <p className="text-sm text-slate-200">{Math.round(selectedPerson.score * 100)}%</p>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                <p className="text-[11px] text-slate-500 uppercase tracking-wider mb-2">Skills</p>
+                <div className="flex flex-wrap gap-2">
+                  {selectedPerson.skills.length > 0 ? (
+                    selectedPerson.skills.map((skill) => (
+                      <Badge key={skill} className="bg-indigo-500/10 text-indigo-300 border-indigo-500/20 text-[10px] font-normal">
+                        {skill}
+                      </Badge>
+                    ))
+                  ) : (
+                    <span className="text-xs text-slate-500">No skills listed</span>
+                  )}
+                </div>
+              </div>
+
+              {loading.personProfile && (
+                <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                  <p className="text-sm text-indigo-300">Loading professor details...</p>
+                </div>
+              )}
+
+              {selectedPersonFacultyProfile ? (
+                <div className="rounded-lg border border-emerald-500/20 bg-slate-950/70 p-4 space-y-4">
+                  <p className="text-[11px] text-emerald-300 uppercase tracking-wider">Professor Details</p>
+                  <p className="text-sm text-slate-200">Email: {selectedPersonFacultyProfile.email || "Not available"}</p>
+
+                  <div>
+                    <p className="text-[11px] text-slate-500 uppercase tracking-wider mb-2">Current Work</p>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedPersonFacultyProfile.current_projects.length > 0 ? (
+                        selectedPersonFacultyProfile.current_projects.map((project) => (
+                          <Badge key={project} className="bg-emerald-500/10 text-emerald-300 border-emerald-500/20 text-[10px] font-normal">
+                            {project}
+                          </Badge>
+                        ))
+                      ) : (
+                        <span className="text-xs text-slate-500">No current projects listed</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-[11px] text-slate-500 uppercase tracking-wider mb-2">Previous Work</p>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedPersonFacultyProfile.previous_projects.length > 0 ? (
+                        selectedPersonFacultyProfile.previous_projects.map((project) => (
+                          <Badge key={project} className="bg-slate-800/60 text-slate-200 border-slate-700 text-[10px] font-normal">
+                            {project}
+                          </Badge>
+                        ))
+                      ) : (
+                        <span className="text-xs text-slate-500">No previous work listed</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-[11px] text-slate-500 uppercase tracking-wider mb-2">Publications</p>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedPersonFacultyProfile.previous_publications.length > 0 ? (
+                        selectedPersonFacultyProfile.previous_publications.map((paper) => (
+                          <Badge key={paper} className="bg-blue-500/10 text-blue-300 border-blue-500/20 text-[10px] font-normal">
+                            {paper}
+                          </Badge>
+                        ))
+                      ) : (
+                        <span className="text-xs text-slate-500">No publications listed</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                !loading.personProfile && (
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                    <p className="text-xs text-slate-500">
+                      Detailed faculty profile not found for this person. Basic semantic profile shown above.
+                    </p>
+                  </div>
+                )
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
