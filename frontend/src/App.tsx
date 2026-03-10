@@ -21,6 +21,11 @@ type PersonSearchResult = {
   match_reason: string;
 };
 
+type QuickTopic = {
+  label: string;
+  query: string;
+};
+
 type ResearcherSearchResult = {
   id: string;
   name?: string;
@@ -36,6 +41,7 @@ type FacultyDetailResult = {
   skills: string[];
   current_projects: string[];
   previous_projects: string[];
+  previous_publications: string[];
 };
 
 type ProjectDetailResult = {
@@ -84,6 +90,77 @@ type GraphOverview = {
 
 const apiBase = "http://localhost:8000";
 
+const quickTopics: QuickTopic[] = [
+  { label: "Sustainable Polymers", query: "sustainable polymers" },
+  { label: "AI + Data Systems", query: "artificial intelligence data systems" },
+  { label: "Robotics", query: "autonomous robotics" },
+  { label: "Smart Grids", query: "smart grid optimization" },
+  { label: "Structural Engineering", query: "civil structural monitoring" },
+  { label: "Signal Processing", query: "electrical signal processing" },
+];
+
+const buildMockPersonResults = (rawQuery: string): PersonSearchResult[] => {
+  const query = rawQuery.trim();
+  const q = query.toLowerCase();
+
+  const departmentCards = [
+    {
+      key: "cse",
+      name: "Dr. Ananya Rao",
+      department: "Computer Science and Engineering",
+      skills: ["Machine Learning", "Distributed Systems", "Software Architecture"],
+    },
+    {
+      key: "mech",
+      name: "Dr. Vikram Desai",
+      department: "Mechanical Engineering",
+      skills: ["Robotics", "CAD/CAE", "Thermal Systems"],
+    },
+    {
+      key: "electrical",
+      name: "Dr. Sneha Iyer",
+      department: "Electrical Engineering",
+      skills: ["Power Systems", "Control Systems", "Smart Grids"],
+    },
+    {
+      key: "civil",
+      name: "Dr. Raghav Kulkarni",
+      department: "Civil Engineering",
+      skills: ["Structural Analysis", "Construction Materials", "Transport Engineering"],
+    },
+    {
+      key: "chemical",
+      name: "Dr. Priya Menon",
+      department: "Chemical Engineering",
+      skills: ["Sustainable Polymers", "Process Engineering", "Reaction Design"],
+    },
+  ];
+
+  const ranked = departmentCards
+    .map((card, idx) => {
+      const keywordScore =
+        Number(card.department.toLowerCase().includes(q)) +
+        card.skills.filter((skill) => q && skill.toLowerCase().includes(q)).length;
+      const looseScore =
+        card.skills.filter((skill) => q && q.split(" ").some((part) => part && skill.toLowerCase().includes(part))).length;
+      return { card, score: keywordScore * 0.3 + looseScore * 0.15 + (0.65 - idx * 0.05) };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 4)
+    .map((item, idx) => ({
+      person_id: `mock-person-${item.card.key}-${idx + 1}`,
+      name: item.card.name,
+      department: item.card.department,
+      score: Math.max(0.4, item.score),
+      skills: item.card.skills,
+      match_reason: query
+        ? `Interactive mock fallback for \"${query}\"`
+        : "Interactive mock fallback",
+    }));
+
+  return ranked;
+};
+
 export function App() {
   const [activeTab, setActiveTab] = useState("semantic");
   const [query, setQuery] = useState("Who is working on sustainable polymers?");
@@ -96,6 +173,7 @@ export function App() {
   const [studentCgpa, setStudentCgpa] = useState("8.5");
   const [studentCourse, setStudentCourse] = useState("Chemical Engineering");
   const [studentMatch, setStudentMatch] = useState<StudentSingleMatchResult | null>(null);
+  const [studentMatchFacultyProfile, setStudentMatchFacultyProfile] = useState<FacultyDetailResult | null>(null);
   const [hotspots, setHotspots] = useState<Hotspot[]>([]);
   const [graphOverview, setGraphOverview] = useState<GraphOverview | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
@@ -105,9 +183,34 @@ export function App() {
     faculty: false,
     project: false,
     studentMatch: false,
+    facultyProfile: false,
     hotspot: false,
     overview: false,
   });
+
+  const fetchFacultyProfileForMatch = async (match: StudentSingleMatchResult) => {
+    if (match.match_type !== "faculty") {
+      setStudentMatchFacultyProfile(null);
+      return;
+    }
+
+    try {
+      const data = await runRequest<FacultyDetailResult[]>(
+        `${apiBase}/search/faculty?query=${encodeURIComponent(match.match_name)}&limit=5`,
+        "facultyProfile"
+      );
+
+      const bestProfile =
+        data.find((row) => row.faculty_id === match.match_id) ??
+        data.find((row) => row.name.toLowerCase() === match.match_name.toLowerCase()) ??
+        data[0] ??
+        null;
+
+      setStudentMatchFacultyProfile(bestProfile);
+    } catch {
+      setStudentMatchFacultyProfile(null);
+    }
+  };
 
   const runRequest = async <T,>(url: string, key: keyof typeof loading): Promise<T> => {
     setLoading((prev) => ({ ...prev, [key]: true }));
@@ -156,22 +259,7 @@ export function App() {
         `${apiBase}/search/researchers?query=${encodeURIComponent(query)}&limit=5`,
         "person"
       );
-      setPersonResults(
-        fallback.map((row) => ({
-          person_id: row.id,
-          name: row.name,
-          department: "",
-          score: row.score,
-          skills: row.skills ?? [],
-          match_reason: "Keyword and graph relevance",
-        }))
-      );
-    } catch {
-      try {
-        const fallback = await runRequest<ResearcherSearchResult[]>(
-          `${apiBase}/search/researchers?query=${encodeURIComponent(query)}&limit=5`,
-          "person"
-        );
+      if (fallback.length > 0) {
         setPersonResults(
           fallback.map((row) => ({
             person_id: row.id,
@@ -182,9 +270,48 @@ export function App() {
             match_reason: "Keyword and graph relevance",
           }))
         );
-      } catch {
-        setPersonResults([]);
+        return;
       }
+
+      setPersonResults(buildMockPersonResults(query));
+    } catch {
+      try {
+        const fallback = await runRequest<ResearcherSearchResult[]>(
+          `${apiBase}/search/researchers?query=${encodeURIComponent(query)}&limit=5`,
+          "person"
+        );
+        if (fallback.length > 0) {
+          setPersonResults(
+            fallback.map((row) => ({
+              person_id: row.id,
+              name: row.name,
+              department: "",
+              score: row.score,
+              skills: row.skills ?? [],
+              match_reason: "Keyword and graph relevance",
+            }))
+          );
+          return;
+        }
+
+        setPersonResults(buildMockPersonResults(query));
+      } catch {
+        setPersonResults(buildMockPersonResults(query));
+      }
+    }
+  };
+
+  const runQuickTopic = async (quickQuery: string) => {
+    setQuery(quickQuery);
+    try {
+      const data = await runRequest<PersonSearchResult[]>(`${apiBase}/search/people?query=${encodeURIComponent(quickQuery)}&top_k=5`, "person");
+      if (data.length > 0) {
+        setPersonResults(data);
+        return;
+      }
+      setPersonResults(buildMockPersonResults(quickQuery));
+    } catch {
+      setPersonResults(buildMockPersonResults(quickQuery));
     }
   };
 
@@ -219,8 +346,10 @@ export function App() {
         "studentMatch"
       );
       setStudentMatch(data);
+      await fetchFacultyProfileForMatch(data);
     } catch {
       setStudentMatch(null);
+      setStudentMatchFacultyProfile(null);
     }
   };
 
@@ -331,12 +460,34 @@ export function App() {
                     {loading.person ? "Thinking..." : "Discover"}
                   </Button>
                 </div>
+                <div className="px-6 pt-4">
+                  <p className="text-[11px] uppercase tracking-wider text-slate-500 mb-2">Quick Explore</p>
+                  <div className="flex flex-wrap gap-2">
+                    {quickTopics.map((topic) => (
+                      <button
+                        key={topic.label}
+                        onClick={() => runQuickTopic(topic.query)}
+                        className="rounded-full border border-slate-700 bg-slate-950/70 px-3 py-1 text-[11px] text-slate-300 hover:border-indigo-500/50 hover:text-indigo-300 transition-all"
+                      >
+                        {topic.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 {errorMessage && (
                   <div className="mx-6 mt-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
                     {errorMessage}
                   </div>
                 )}
                 <div className="max-h-[500px] overflow-y-auto p-6 space-y-4">
+                  {personResults.length > 0 && (
+                    <div className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2">
+                      <p className="text-xs text-slate-400">
+                        {personResults.length} result{personResults.length > 1 ? "s" : ""} for "{query}"
+                      </p>
+                      <span className="text-[11px] text-indigo-300">Semantic + fallback ranking</span>
+                    </div>
+                  )}
                   {personResults.length === 0 && (
                     <div className="py-20 text-center text-slate-500 italic">Enter a query to explore the graph...</div>
                   )}
@@ -451,6 +602,61 @@ export function App() {
                         <div className="text-xs text-slate-400 space-y-1">
                           {studentMatch.project_status && <p>Status: {studentMatch.project_status}</p>}
                           {studentMatch.project_progress != null && <p>Progress: {studentMatch.project_progress}%</p>}
+                        </div>
+                      )}
+
+                      {studentMatch.match_type === "faculty" && loading.facultyProfile && (
+                        <p className="text-xs text-indigo-300">Loading faculty profile...</p>
+                      )}
+
+                      {studentMatch.match_type === "faculty" && studentMatchFacultyProfile && (
+                        <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3 space-y-3">
+                          <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-300">Faculty Profile</h4>
+                          <p className="text-xs text-slate-300">
+                            Email: {studentMatchFacultyProfile.email || "Not available"}
+                          </p>
+                          <div>
+                            <p className="text-[11px] text-slate-400 mb-1">Current Work</p>
+                            <div className="flex flex-wrap gap-2">
+                              {studentMatchFacultyProfile.current_projects.length > 0 ? (
+                                studentMatchFacultyProfile.current_projects.slice(0, 5).map((project) => (
+                                  <Badge key={project} className="bg-indigo-500/10 text-indigo-300 border-indigo-500/20 text-[10px] font-normal">
+                                    {project}
+                                  </Badge>
+                                ))
+                              ) : (
+                                <span className="text-xs text-slate-500">No active projects listed</span>
+                              )}
+                            </div>
+                          </div>
+                          <div>
+                            <p className="text-[11px] text-slate-400 mb-1">Previous Work</p>
+                            <div className="flex flex-wrap gap-2">
+                              {studentMatchFacultyProfile.previous_projects.length > 0 ? (
+                                studentMatchFacultyProfile.previous_projects.slice(0, 5).map((project) => (
+                                  <Badge key={project} className="bg-slate-800/50 text-slate-300 text-[10px] font-normal">
+                                    {project}
+                                  </Badge>
+                                ))
+                              ) : (
+                                <span className="text-xs text-slate-500">No previous projects listed</span>
+                              )}
+                            </div>
+                          </div>
+                          <div>
+                            <p className="text-[11px] text-slate-400 mb-1">Publications</p>
+                            <div className="flex flex-wrap gap-2">
+                              {studentMatchFacultyProfile.previous_publications.length > 0 ? (
+                                studentMatchFacultyProfile.previous_publications.slice(0, 5).map((publication) => (
+                                  <Badge key={publication} className="bg-emerald-500/10 text-emerald-300 border-emerald-500/20 text-[10px] font-normal">
+                                    {publication}
+                                  </Badge>
+                                ))
+                              ) : (
+                                <span className="text-xs text-slate-500">No publications listed</span>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       )}
                     </div>

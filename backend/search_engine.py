@@ -102,7 +102,7 @@ def search_people(query: str, top_k: int = 3) -> list[dict[str, Any]]:
     driver = GraphDatabase.driver(uri, auth=(user, password), connection_timeout=10)
     try:
         with driver.session(database=database) as session:
-            rows = session.run(
+            vector_rows = session.run(
                 """
                 CALL db.index.vector.queryNodes($index_name, $top_k, $embedding)
                 YIELD node, score
@@ -113,16 +113,14 @@ def search_people(query: str, top_k: int = 3) -> list[dict[str, Any]]:
                      score,
                      all_skills,
                      [sk IN all_skills WHERE toLower(sk) CONTAINS toLower($query)] AS related_skills,
-                     toLower($query) AS q
-                 WITH node, score, related_skills, q
-                 WHERE size(related_skills) > 0
-                    OR toLower(coalesce(node.name, '')) CONTAINS q
-                    OR toLower(coalesce(node.department, '')) CONTAINS q
+                     toLower($query) AS q,
+                     [sk IN all_skills WHERE sk IS NOT NULL][0..5] AS top_skills
+                WITH node, score, related_skills, top_skills
                 RETURN coalesce(node.id, elementId(node)) AS person_id,
                        node.name AS name,
                        node.department AS department,
                        score,
-                      related_skills[0..5] AS skills
+                       CASE WHEN size(related_skills) > 0 THEN related_skills[0..5] ELSE top_skills END AS skills
                 ORDER BY score DESC
                 LIMIT $top_k
                 """,
@@ -133,7 +131,8 @@ def search_people(query: str, top_k: int = 3) -> list[dict[str, Any]]:
                     "query": query,
                 },
             )
-            return [
+
+            vector_results = [
                 {
                     "person_id": row["person_id"],
                     "name": row["name"],
@@ -147,7 +146,46 @@ def search_people(query: str, top_k: int = 3) -> list[dict[str, Any]]:
                     )
                     + (" (local embedding fallback)" if used_fallback else ""),
                 }
-                for row in rows
+                for row in vector_rows
+            ]
+
+            if vector_results:
+                return vector_results
+
+            keyword_rows = session.run(
+                """
+                MATCH (p:Person)
+                OPTIONAL MATCH (p)-[:HAS_SKILL]->(s:Skill)
+                WITH p,
+                     collect(DISTINCT s.name) AS skills,
+                     toLower($query) AS q,
+                     split(toLower($query), ' ') AS parts
+                WITH p, skills, q, parts,
+                     CASE WHEN toLower(coalesce(p.name, '')) CONTAINS q THEN 0.7 ELSE 0.0 END +
+                     CASE WHEN toLower(coalesce(p.department, '')) CONTAINS q THEN 0.5 ELSE 0.0 END +
+                     size([sk IN skills WHERE sk IS NOT NULL AND any(part IN parts WHERE part <> '' AND toLower(sk) CONTAINS part)]) * 0.25 AS relevance
+                WHERE relevance > 0
+                RETURN coalesce(p.id, elementId(p)) AS person_id,
+                       p.name AS name,
+                       p.department AS department,
+                       relevance AS score,
+                       [sk IN skills WHERE sk IS NOT NULL][0..5] AS skills
+                ORDER BY relevance DESC, name ASC
+                LIMIT $top_k
+                """,
+                {"query": query, "top_k": top_k},
+            )
+
+            return [
+                {
+                    "person_id": row["person_id"],
+                    "name": row["name"],
+                    "department": row["department"],
+                    "score": float(row["score"]),
+                    "skills": row["skills"] or [],
+                    "match_reason": "Keyword fallback on Person profile fields",
+                }
+                for row in keyword_rows
             ]
     except (ServiceUnavailable, SessionExpired) as exc:
         raise SearchEngineError(

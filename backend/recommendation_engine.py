@@ -7,6 +7,88 @@ from typing import Any
 from app.db.neo4j_client import Neo4jClient
 
 
+MOCK_DEPARTMENT_KEYWORDS: dict[str, list[str]] = {
+    "Computer Science and Engineering": ["cse", "computer", "software", "ai", "ml", "data", "cyber"],
+    "Mechanical Engineering": ["mechanical", "mech", "robotics", "manufacturing", "thermal", "cad"],
+    "Electrical Engineering": ["electrical", "power", "grid", "electronics", "signal", "control"],
+    "Civil Engineering": ["civil", "structure", "construction", "transport", "geotech", "survey"],
+    "Chemical Engineering": ["chemical", "polymer", "process", "reaction", "sustainable", "materials"],
+}
+
+
+MOCK_FACULTY_BY_DEPARTMENT: dict[str, dict[str, Any]] = {
+    "Computer Science and Engineering": {
+        "match_id": "FAC-MOCK-CSE-001",
+        "match_name": "Dr. Ananya Rao",
+        "reason": "Mock match: your query aligns with AI/data systems in CSE.",
+        "overlap_topics": ["AI", "Data Systems", "Software Engineering"],
+    },
+    "Mechanical Engineering": {
+        "match_id": "FAC-MOCK-MECH-001",
+        "match_name": "Dr. Vikram Desai",
+        "reason": "Mock match: your query aligns with mechanical design and robotics.",
+        "overlap_topics": ["Robotics", "Design", "Manufacturing"],
+    },
+    "Electrical Engineering": {
+        "match_id": "FAC-MOCK-EE-001",
+        "match_name": "Dr. Sneha Iyer",
+        "reason": "Mock match: your query aligns with electrical systems and power electronics.",
+        "overlap_topics": ["Power Systems", "Electronics", "Control"],
+    },
+    "Civil Engineering": {
+        "match_id": "FAC-MOCK-CIVIL-001",
+        "match_name": "Dr. Raghav Kulkarni",
+        "reason": "Mock match: your query aligns with infrastructure and structural analysis.",
+        "overlap_topics": ["Structures", "Infrastructure", "Construction"],
+    },
+    "Chemical Engineering": {
+        "match_id": "FAC-MOCK-CHE-001",
+        "match_name": "Dr. Priya Menon",
+        "reason": "Mock match: your query aligns with process and advanced materials research.",
+        "overlap_topics": ["Process Engineering", "Polymers", "Sustainability"],
+    },
+}
+
+
+MOCK_PROJECT_BY_DEPARTMENT: dict[str, dict[str, Any]] = {
+    "Computer Science and Engineering": {
+        "match_type": "project",
+        "match_id": "PRJ-MOCK-CSE-100",
+        "match_name": "Edge AI for Smart Campus Operations",
+        "project_status": "active",
+        "project_progress": 52,
+    },
+    "Mechanical Engineering": {
+        "match_type": "project",
+        "match_id": "PRJ-MOCK-MECH-100",
+        "match_name": "Autonomous Inspection Robot Platform",
+        "project_status": "active",
+        "project_progress": 47,
+    },
+    "Electrical Engineering": {
+        "match_type": "project",
+        "match_id": "PRJ-MOCK-EE-100",
+        "match_name": "Microgrid Reliability Optimization",
+        "project_status": "active",
+        "project_progress": 61,
+    },
+    "Civil Engineering": {
+        "match_type": "project",
+        "match_id": "PRJ-MOCK-CIVIL-100",
+        "match_name": "Smart Concrete Structural Health Monitoring",
+        "project_status": "planning",
+        "project_progress": 32,
+    },
+    "Chemical Engineering": {
+        "match_type": "project",
+        "match_id": "PRJ-MOCK-CHE-100",
+        "match_name": "Sustainable Polymer Upcycling Workflow",
+        "project_status": "active",
+        "project_progress": 58,
+    },
+}
+
+
 COLLABORATOR_QUERY = """
 MATCH (u)
 WHERE (u:Faculty OR u:Student) AND u.id = $user_id
@@ -193,7 +275,11 @@ class RecommendationEngine:
             },
         )
         if rows:
-            return rows[0].get("candidate")
+            candidate = rows[0].get("candidate") or {}
+            candidate_score = float(candidate.get("score") or 0.0)
+            if candidate_score >= 50.0:
+                return candidate
+            return self._mock_student_match(topic=topic, cgpa=cgpa, course=course)
 
         dataset_path = Path("/Users/ashutoshpandey/Downloads/dataset_200.json")
         if not dataset_path.exists():
@@ -265,6 +351,14 @@ class RecommendationEngine:
     def _mock_student_match(self, topic: str, cgpa: float, course: str) -> dict[str, Any]:
         cleaned_topic = topic.strip() or "research"
         cleaned_course = course.strip() or "General"
+        topic_lc = cleaned_topic.lower()
+        course_lc = cleaned_course.lower()
+
+        department = "Computer Science and Engineering"
+        for department_name, keywords in MOCK_DEPARTMENT_KEYWORDS.items():
+            if any(keyword in course_lc or keyword in topic_lc for keyword in keywords):
+                department = department_name
+                break
 
         if cgpa >= 8.5:
             score = 89.0
@@ -275,18 +369,35 @@ class RecommendationEngine:
         else:
             score = 58.0
 
-        topic_slug = "-".join(cleaned_topic.lower().split())[:20] or "topic"
-        match_id = f"mock-faculty-{topic_slug}"
+        prefer_project = any(
+            word in topic_lc for word in ["project", "build", "prototype", "implementation", "design"]
+        )
 
+        if prefer_project:
+            project = MOCK_PROJECT_BY_DEPARTMENT.get(department, MOCK_PROJECT_BY_DEPARTMENT["Computer Science and Engineering"])
+            return {
+                "match_type": project["match_type"],
+                "match_id": project["match_id"],
+                "match_name": project["match_name"],
+                "department": department,
+                "score": score + 4.0,
+                "reason": "Mock recommendation generated based on department and project-oriented query.",
+                "overlap_topics": [cleaned_topic, department],
+                "required_course": department,
+                "project_status": project["project_status"],
+                "project_progress": project["project_progress"],
+            }
+
+        faculty = MOCK_FACULTY_BY_DEPARTMENT.get(department, MOCK_FACULTY_BY_DEPARTMENT["Computer Science and Engineering"])
         return {
             "match_type": "faculty",
-            "match_id": match_id,
-            "match_name": "Dr. Priya Menon",
-            "department": cleaned_course,
+            "match_id": faculty["match_id"],
+            "match_name": faculty["match_name"],
+            "department": department,
             "score": score,
-            "reason": "Mock recommendation generated because no live graph/dataset match was available.",
-            "overlap_topics": [cleaned_topic],
-            "required_course": cleaned_course,
+            "reason": faculty["reason"],
+            "overlap_topics": [cleaned_topic] + faculty["overlap_topics"][0:2],
+            "required_course": department,
             "project_status": None,
             "project_progress": None,
         }
