@@ -61,7 +61,12 @@ def ingest_dummy_data(seed: int = 42, include_embeddings: bool = False) -> dict:
     embedder = EmbeddingProvider()
 
     faculty = [
-        {"id": f"FAC-{i:03d}", "name": f"Faculty {i}", "department": random.choice(DEPARTMENTS)}
+        {
+            "id": f"FAC-{i:03d}",
+            "name": f"Faculty {i}",
+            "department": random.choice(DEPARTMENTS),
+            "email": f"faculty{i}@institution.edu",
+        }
         for i in range(1, 16)
     ]
     students = [
@@ -72,7 +77,10 @@ def ingest_dummy_data(seed: int = 42, include_embeddings: bool = False) -> dict:
         {
             "id": f"PRJ-{i:03d}",
             "title": f"Project {i} on {random.choice(SKILLS)}",
+            "description": f"Research initiative focused on {random.choice(SKILLS)} with institutional collaboration.",
             "tags": random.sample(SKILLS, k=3),
+            "status": random.choice(["In Progress", "Completed", "Planned"]),
+            "progress": random.randint(25, 100),
             "created_at": _rand_date(),
         }
         for i in range(1, 21)
@@ -90,11 +98,14 @@ def ingest_dummy_data(seed: int = 42, include_embeddings: bool = False) -> dict:
     skills = [{"id": f"SKL-{i:03d}", "name": s} for i, s in enumerate(SKILLS, start=1)]
 
     project_rows: list[dict] = []
+    project_student_edges: list[dict] = []
     project_texts: list[str] = []
     for p in projects:
         owner = random.choice(faculty)
         project_rows.append({**p, "owner_id": owner["id"]})
         project_texts.append(_project_text(p["title"], p["tags"], owner["department"]))
+        for student in random.sample(students, k=random.randint(1, 3)):
+            project_student_edges.append({"sid": student["id"], "pid": p["id"]})
 
     publication_rows: list[dict] = []
     publication_texts: list[str] = []
@@ -144,7 +155,7 @@ def ingest_dummy_data(seed: int = 42, include_embeddings: bool = False) -> dict:
                 """
                 UNWIND $rows AS row
                 MERGE (n:Faculty {id: row.id})
-                SET n.name = row.name, n.department = row.department
+                SET n.name = row.name, n.department = row.department, n.email = row.email
                 """,
                 {"rows": faculty},
             )
@@ -171,7 +182,10 @@ def ingest_dummy_data(seed: int = 42, include_embeddings: bool = False) -> dict:
                     UNWIND $rows AS row
                     MERGE (n:ResearchProject {id: row.id})
                     SET n.title = row.title,
+                        n.description = row.description,
                         n.tags = row.tags,
+                        n.status = row.status,
+                        n.progress = row.progress,
                         n.created_at = date(row.created_at),
                         n.embedding = row.embedding
                     """,
@@ -195,7 +209,10 @@ def ingest_dummy_data(seed: int = 42, include_embeddings: bool = False) -> dict:
                     UNWIND $rows AS row
                     MERGE (n:ResearchProject {id: row.id})
                     SET n.title = row.title,
+                        n.description = row.description,
                         n.tags = row.tags,
+                        n.status = row.status,
+                        n.progress = row.progress,
                         n.created_at = date(row.created_at)
                     """,
                     {"rows": project_rows},
@@ -219,6 +236,14 @@ def ingest_dummy_data(seed: int = 42, include_embeddings: bool = False) -> dict:
                 MERGE (f)-[:WORKS_ON]->(p)
                 """,
                 {"rows": project_rows},
+            )
+            session.run(
+                """
+                UNWIND $rows AS row
+                MATCH (s:Student {id: row.sid}), (p:ResearchProject {id: row.pid})
+                MERGE (s)-[:WORKS_ON]->(p)
+                """,
+                {"rows": project_student_edges},
             )
 
             session.run(
