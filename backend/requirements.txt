@@ -1,0 +1,11 @@
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+pydantic==2.11.7
+pydantic-settings==2.10.1
+neo4j==5.28.2
+langchain==0.3.27
+langchain-openai==0.3.30
+sentence-transformers==3.0.1
+numpy==1.26.4
+python-dotenv==1.1.1
+pinecone-client==5.0.1
